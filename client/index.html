@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>A2UI Retail Agent — ADK + Gemini</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+  /* ── Design System ──────────────────────────────────────────────── */
+  :root {
+    --bg:          #0d0d0f;
+    --bg-card:     #16161a;
+    --bg-surface:  #1e1e24;
+    --border:      #2a2a35;
+    --accent:      #6ee7b7;        /* emerald mint */
+    --accent-warm: #fbbf24;        /* amber */
+    --accent-muted:#2d6a57;
+    --text-primary:#f0f0f5;
+    --text-sub:    #8888a4;
+    --text-code:   #a78bfa;
+    --danger:      #f87171;
+    --radius:      12px;
+    --radius-lg:   20px;
+    --font-display:"DM Serif Display", Georgia, serif;
+    --font-body:   "DM Sans", system-ui, sans-serif;
+    --font-mono:   "DM Mono", monospace;
+    --shadow:      0 8px 40px rgba(0,0,0,.55);
+    --glow:        0 0 24px rgba(110,231,183,.15);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    grid-template-rows: 60px 1fr;
+  }
+
+  /* ── Header ─────────────────────────────────────────────────────── */
+  header {
+    grid-column: 1 / -1;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 28px;
+    gap: 14px;
+  }
+  .logo {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    color: var(--accent);
+    letter-spacing: -.01em;
+  }
+  .badge {
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    background: var(--accent-muted);
+    color: var(--accent);
+    padding: 3px 9px;
+    border-radius: 20px;
+    letter-spacing: .04em;
+  }
+  .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .8rem;
+    color: var(--text-sub);
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; } 50% { opacity: .4; }
+  }
+
+  /* ── Left Panel — Chat ───────────────────────────────────────────── */
+  #chat-panel {
+    background: var(--bg-card);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .msg {
+    max-width: 100%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: .875rem;
+    line-height: 1.5;
+    animation: fadeUp .25s ease;
+  }
+  .msg.user {
+    background: var(--accent-muted);
+    color: var(--accent);
+    border-radius: 12px 12px 4px 12px;
+    align-self: flex-end;
+    font-weight: 500;
+  }
+  .msg.agent {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 12px 12px 12px 4px;
+    align-self: flex-start;
+    color: var(--text-sub);
+    font-family: var(--font-mono);
+    font-size: .78rem;
+  }
+  .msg.system {
+    text-align: center;
+    color: var(--text-sub);
+    font-size: .75rem;
+    border: none;
+    background: none;
+    padding: 4px;
+  }
+  @keyframes fadeUp {
+    from { opacity:0; transform: translateY(8px); }
+    to   { opacity:1; transform: translateY(0); }
+  }
+
+  #input-row {
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+  }
+  #query-input {
+    flex: 1;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: .875rem;
+    padding: 10px 14px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  #query-input:focus { border-color: var(--accent); }
+  #send-btn {
+    background: var(--accent);
+    color: #0d0d0f;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-weight: 600;
+    font-size: .875rem;
+    cursor: pointer;
+    transition: opacity .15s, transform .1s;
+  }
+  #send-btn:hover { opacity: .9; }
+  #send-btn:active { transform: scale(.97); }
+  #send-btn:disabled { opacity: .4; cursor: default; }
+
+  .suggestions {
+    padding: 0 16px 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .chip {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-sub);
+    font-size: .75rem;
+    padding: 5px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+    user-select: none;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Right Panel — A2UI Surface ──────────────────────────────────── */
+  #surface-panel {
+    background: var(--bg);
+    overflow-y: auto;
+    padding: 32px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  #surface-title {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    color: var(--text-sub);
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #surface-title span { color: var(--accent); }
+
+  /* ── A2UI Component Renderers ────────────────────────────────────── */
+  .a2ui-root { display: flex; flex-direction: column; gap: 20px; }
+
+  /* Column */
+  .a2ui-Column {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* Row */
+  .a2ui-Row {
+    display: flex;
+    flex-direction: row;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  /* List */
+  .a2ui-List {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+  }
+
+  /* Card */
+  .a2ui-Card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: border-color .2s, box-shadow .2s, transform .2s;
+    animation: cardIn .35s ease backwards;
+  }
+  .a2ui-Card:hover {
+    border-color: var(--accent-muted);
+    box-shadow: var(--glow);
+    transform: translateY(-2px);
+  }
+  @keyframes cardIn {
+    from { opacity:0; transform: translateY(16px) scale(.97); }
+    to   { opacity:1; transform: translateY(0) scale(1); }
+  }
+
+  /* Text variants */
+  .a2ui-Text { color: var(--text-primary); line-height: 1.5; }
+  .a2ui-Text[data-variant="h1"] {
+    font-family: var(--font-display);
+    font-size: 1.9rem;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+  .a2ui-Text[data-variant="h2"] {
+    font-family: var(--font-display);
+    font-size: 1.4rem;
+    color: var(--text-primary);
+  }
+  .a2ui-Text[data-variant="h3"] {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .a2ui-Text[data-variant="body"] { font-size: .9rem; color: var(--text-primary); }
+  .a2ui-Text[data-variant="caption"] {
+    font-size: .8rem;
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-weight: 500;
+  }
+  .a2ui-Text[data-variant="secondary"] { font-size: .85rem; color: var(--text-sub); }
+
+  /* Rating stars */
+  .rating {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: .8rem;
+  }
+  .stars { color: var(--accent-warm); letter-spacing: 1px; }
+  .rating-val { color: var(--text-sub); font-family: var(--font-mono); }
+
+  /* Stock badge */
+  .stock-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: .72rem;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font-family: var(--font-mono);
+  }
+  .stock-badge.ok  { background: rgba(110,231,183,.12); color: var(--accent); }
+  .stock-badge.low { background: rgba(251,191,36,.12);  color: var(--accent-warm); }
+
+  /* Divider */
+  .a2ui-Divider {
+    height: 1px;
+    background: var(--border);
+    border: none;
+    margin: 4px 0;
+  }
+
+  /* Button */
+  .a2ui-Button {
+    padding: 10px 18px;
+    border-radius: 10px;
+    border: none;
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: .85rem;
+    cursor: pointer;
+    transition: opacity .15s, transform .1s, box-shadow .2s;
+    align-self: flex-start;
+  }
+  .a2ui-Button[data-variant="primary"] {
+    background: var(--accent);
+    color: #0d0d0f;
+    box-shadow: 0 2px 12px rgba(110,231,183,.3);
+  }
+  .a2ui-Button[data-variant="primary"]:hover {
+    opacity: .9;
+    box-shadow: 0 4px 20px rgba(110,231,183,.45);
+  }
+  .a2ui-Button[data-variant="secondary"] {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+  }
+  .a2ui-Button:active { transform: scale(.97); }
+
+  /* ── A2UI Protocol Inspector ─────────────────────────────────────── */
+  #proto-panel {
+    grid-column: 1 / -1;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 14px 20px;
+    display: none;
+  }
+  #proto-panel.open { display: block; }
+  #proto-panel h4 {
+    font-family: var(--font-mono);
+    font-size: .75rem;
+    color: var(--text-sub);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+  .proto-msg {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    color: var(--text-code);
+    border-left: 2px solid var(--accent-muted);
+    padding-left: 10px;
+    margin-bottom: 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #toggle-proto {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-sub);
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+    z-index: 100;
+  }
+  #toggle-proto:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Skeleton Loader ─────────────────────────────────────────────── */
+  .skeleton {
+    background: linear-gradient(90deg, var(--bg-surface) 25%, var(--border) 50%, var(--bg-surface) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+    border-radius: 8px;
+  }
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .skeleton-card {
+    height: 160px;
+    border-radius: var(--radius-lg);
+  }
+
+  /* ── Toast ───────────────────────────────────────────────────────── */
+  #toast {
+    position: fixed;
+    bottom: 60px;
+    right: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    padding: 10px 18px;
+    border-radius: 10px;
+    box-shadow: var(--glow);
+    transform: translateY(80px);
+    opacity: 0;
+    transition: transform .3s ease, opacity .3s ease;
+    z-index: 200;
+    pointer-events: none;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+
+  /* ── Scrollbar ───────────────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">RetailMind</div>
+  <div class="badge">A2UI v0.9 · ADK 2.0 · Gemini</div>
+  <div class="header-right">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Checking agent…</span>
+  </div>
+</header>
+
+<!-- Left: Chat Panel -->
+<div id="chat-panel">
+  <div id="messages">
+    <div class="msg system">A2UI Retail Agent ready. Ask about any product.</div>
+  </div>
+  <div class="suggestions" id="chips">
+    <div class="chip" onclick="sendQuery(this.textContent)">wireless headphones</div>
+    <div class="chip" onclick="sendQuery(this.textContent)">noise cancelling under $300</div>
+    <div class="chip" onclick="sendQuery(this.textContent)">vacuum cleaner</div>
+    <div class="chip" onclick="sendQuery(this.textContent)">winter jacket</div>
+  </div>
+  <div id="input-row">
+    <input id="query-input" type="text"
+           placeholder="Search for products…"
+           onkeydown="if(event.key==='Enter') sendQuery()" />
+    <button id="send-btn" onclick="sendQuery()">Send</button>
+  </div>
+</div>
+
+<!-- Right: A2UI Surface -->
+<div id="surface-panel">
+  <div id="surface-title">
+    <span>↗</span> A2UI Surface Renderer
+  </div>
+  <div id="surface-root" class="a2ui-root">
+    <div style="color:var(--text-sub);font-size:.9rem;margin-top:40px;text-align:center;line-height:2;">
+      The agent will render rich UI here via A2UI JSON.<br/>
+      <span style="font-family:var(--font-mono);font-size:.78rem;color:var(--border);">
+        createSurface → updateComponents → updateDataModel
+      </span>
+    </div>
+  </div>
+</div>
+
+<!-- A2UI Protocol Inspector (toggle) -->
+<div id="proto-panel">
+  <h4>A2UI Wire Protocol — Raw Messages</h4>
+  <div id="proto-messages"></div>
+</div>
+
+<!-- Floating Controls -->
+<button id="toggle-proto" onclick="toggleProto()">⬡ A2UI protocol</button>
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// A2UI CLIENT RENDERER
+// Parses A2UI v0.9 JSON and renders native HTML components.
+//
+// Supported message types:
+//   createSurface    – initialise surface
+//   updateComponents – build/update component tree
+//   updateDataModel  – populate data for data-bound text
+//   deleteSurface    – clear UI
+// ═══════════════════════════════════════════════════════════════════
+
+// Agent base URL — override via ?agent=http://host:port in the URL
+const AGENT_BASE = (new URLSearchParams(location.search).get("agent") || "http://localhost:8000").replace(/\/+$/, "");
+
+// Renderer state
+const state = {
+  surfaces: {},      // surfaceId → { components:{}, dataModel:{} }
+  sessionId: "session_" + Math.random().toString(36).slice(2),
+};
+
+// ── Surface Management ────────────────────────────────────────────
+
+function createSurface(msg) {
+  const { surfaceId } = msg.createSurface;
+  state.surfaces[surfaceId] = { components: {}, dataModel: {} };
+  logProto("createSurface", msg);
+}
+
+function updateComponents(msg) {
+  const { surfaceId, components } = msg.updateComponents;
+  if (!state.surfaces[surfaceId]) state.surfaces[surfaceId] = { components: {}, dataModel: {} };
+  for (const comp of components) {
+    state.surfaces[surfaceId].components[comp.id] = comp;
+  }
+  logProto("updateComponents", msg);
+  renderSurface(surfaceId);
+}
+
+function updateDataModel(msg) {
+  const { surfaceId, path, value } = msg.updateDataModel;
+  if (!state.surfaces[surfaceId]) state.surfaces[surfaceId] = { components: {}, dataModel: {} };
+  setPath(state.surfaces[surfaceId].dataModel, path, value);
+  logProto("updateDataModel", msg);
+  renderSurface(surfaceId);
+}
+
+function deleteSurface(msg) {
+  const { surfaceId } = msg.deleteSurface;
+  delete state.surfaces[surfaceId];
+  logProto("deleteSurface", msg);
+  document.getElementById("surface-root").innerHTML =
+    '<div style="color:var(--text-sub);text-align:center;padding:40px;">Surface cleared.</div>';
+}
+
+// ── Data Path Resolution ──────────────────────────────────────────
+
+function setPath(obj, path, value) {
+  const parts = path.replace(/^\//, "").split("/").filter(Boolean);
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur[parts[i]] === undefined) cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  if (parts.length) cur[parts[parts.length - 1]] = value;
+  else Object.assign(obj, value);
+}
+
+function resolvePath(obj, pathStr) {
+  const parts = pathStr.replace(/^\//, "").split("/").filter(Boolean);
+  let cur = obj;
+  for (const p of parts) {
+    if (cur === undefined || cur === null) return undefined;
+    cur = cur[p];
+  }
+  return cur;
+}
+
+function resolveValue(val, dataModel) {
+  if (val && typeof val === "object" && val.path) {
+    return resolvePath(dataModel, val.path);
+  }
+  return val;
+}
+
+// ── Component Rendering ───────────────────────────────────────────
+
+function renderComponent(id, surface) {
+  const comp = surface.components[id];
+  if (!comp) return null;
+
+  const { component, children, child } = comp;
+  const dm = surface.dataModel;
+
+  const el = document.createElement("div");
+  el.dataset.id = id;
+  el.dataset.component = component;
+
+  const childIds = children || (child ? [child] : []);
+
+  switch (component) {
+    case "Column":
+      el.className = "a2ui-Column";
+      for (const cid of childIds) {
+        const cel = renderComponent(cid, surface);
+        if (cel) el.appendChild(cel);
+      }
+      break;
+
+    case "Row":
+      el.className = "a2ui-Row";
+      for (const cid of childIds) {
+        const cel = renderComponent(cid, surface);
+        if (cel) el.appendChild(cel);
+      }
+      break;
+
+    case "List":
+      el.className = "a2ui-List";
+      // Inject staggered animation delays
+      childIds.forEach((cid, i) => {
+        const cel = renderComponent(cid, surface);
+        if (cel) {
+          cel.style.animationDelay = `${i * 60}ms`;
+          el.appendChild(cel);
+        }
+      });
+      break;
+
+    case "Card":
+      el.className = "a2ui-Card";
+      for (const cid of childIds) {
+        const cel = renderComponent(cid, surface);
+        if (cel) el.appendChild(cel);
+      }
+      // Augment card with rating + stock if data available
+      const cardData = getCardData(comp, dm);
+      if (cardData) {
+        if (cardData.rating) {
+          const ratingEl = buildRating(cardData.rating);
+          el.appendChild(ratingEl);
+        }
+        if (cardData.stock !== undefined) {
+          const stockEl = buildStockBadge(cardData.stock);
+          el.appendChild(stockEl);
+        }
+      }
+      break;
+
+    case "Text": {
+      const text = resolveValue(comp.text, dm);
+      el.className = "a2ui-Text";
+      el.dataset.variant = comp.variant || "body";
+      el.textContent = text !== undefined ? String(text) : "";
+      break;
+    }
+
+    case "Divider":
+      return document.createElement("hr");
+
+    case "Button": {
+      el.tagName; // reassign
+      const btn = document.createElement("button");
+      btn.className = `a2ui-Button`;
+      btn.dataset.variant = comp.variant || "secondary";
+      const labelChild = renderComponent(child, surface);
+      if (labelChild) btn.appendChild(labelChild);
+      // Wire action
+      if (comp.action?.event) {
+        const { name, context } = comp.action.event;
+        btn.onclick = () => handleAction(name, context, dm);
+      }
+      return btn;
+    }
+
+    default:
+      el.style.display = "none";
+      break;
+  }
+
+  return el;
+}
+
+// ── Card Data Helpers (enrich from data model) ────────────────────
+
+function getCardData(comp, dm) {
+  // Try to figure out which product index this card maps to
+  const idNum = (comp.id.match(/\d+/) || [null])[0];
+  if (idNum === null) return null;
+  const idx = parseInt(idNum) - 1;
+  const products = dm.products;
+  if (!products || !products[idx]) return null;
+  return products[idx];
+}
+
+function buildRating(rating) {
+  const div = document.createElement("div");
+  div.className = "rating";
+  const stars = "★".repeat(Math.round(rating)) + "☆".repeat(5 - Math.round(rating));
+  div.innerHTML = `<span class="stars">${stars}</span><span class="rating-val">${rating}</span>`;
+  return div;
+}
+
+function buildStockBadge(stock) {
+  const span = document.createElement("span");
+  span.className = `stock-badge ${stock <= 10 ? "low" : "ok"}`;
+  span.innerHTML = stock <= 10
+    ? `⚠ Only ${stock} left`
+    : `✓ ${stock} in stock`;
+  return span;
+}
+
+// ── Surface Render Orchestration ──────────────────────────────────
+
+function renderSurface(surfaceId) {
+  const surface = state.surfaces[surfaceId];
+  if (!surface) return;
+
+  const root = document.getElementById("surface-root");
+
+  // Find root component (named "root" or first Column)
+  const rootComp = surface.components["root"]
+    || Object.values(surface.components).find(c => c.component === "Column");
+
+  if (!rootComp) return;
+
+  root.innerHTML = "";
+  const el = renderComponent(rootComp.id, surface);
+  if (el) root.appendChild(el);
+}
+
+// ── Action Handler ────────────────────────────────────────────────
+
+function handleAction(name, context, dm) {
+  const resolved = {};
+  for (const [k, v] of Object.entries(context || {})) {
+    resolved[k] = resolveValue(v, dm);
+  }
+  console.log("[A2UI Action]", name, resolved);
+  showToast(`Action: ${name} — ${JSON.stringify(resolved)}`);
+}
+
+// ── Main Message Dispatcher ───────────────────────────────────────
+
+function dispatchA2UIMessage(msg) {
+  if (msg.createSurface)    createSurface(msg);
+  else if (msg.updateComponents) updateComponents(msg);
+  else if (msg.updateDataModel)  updateDataModel(msg);
+  else if (msg.deleteSurface)    deleteSurface(msg);
+  // beginRendering / surfaceUpdate are aliases used in some ADK samples
+  else if (msg.beginRendering)   createSurface({ createSurface: msg.beginRendering });
+  else if (msg.surfaceUpdate)    updateComponents({ updateComponents: msg.surfaceUpdate });
+  else if (msg.dataModelUpdate)  updateDataModel({ updateDataModel: { ...msg.dataModelUpdate, path: "/" } });
+}
+
+// ── Agent Query ───────────────────────────────────────────────────
+
+async function sendQuery(text) {
+  const input = document.getElementById("query-input");
+  const query = (text || input.value).trim();
+  if (!query) return;
+
+  input.value = "";
+  document.getElementById("send-btn").disabled = true;
+  addMessage("user", query);
+
+  // Show skeleton while waiting
+  showSkeleton();
+
+  try {
+    // Use streaming endpoint for real-time rendering
+    const res = await fetch(`${AGENT_BASE}/query/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, session_id: state.sessionId }),
+    });
+
+    if (!res.ok) throw new Error(`Agent returned ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    clearSkeleton();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop(); // keep incomplete line
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") {
+          addMessage("system", "✓ A2UI response rendered");
+          break;
+        }
+        try {
+          const msg = JSON.parse(data);
+          dispatchA2UIMessage(msg);
+        } catch (e) {
+          console.warn("SSE parse error:", e);
+        }
+      }
+    }
+
+  } catch (err) {
+    clearSkeleton();
+    console.warn("Agent unreachable:", err.message);
+    addMessage("system", `⚠ Agent error: ${err.message}`);
+    addMessage("agent", "ℹ Agent offline — rendering demo A2UI payload");
+    renderDemoPayload(query);
+  }
+
+  document.getElementById("send-btn").disabled = false;
+}
+
+// ── Demo Mode (offline fallback) ──────────────────────────────────
+// Shows what a real Gemini-generated A2UI response would look like.
+
+function renderDemoPayload(query) {
+  const demoMessages = [
+    {
+      version: "v0.9",
+      createSurface: { surfaceId: "products", catalogId: "https://a2ui.org/specification/v0_9/basic_catalog.json" }
+    },
+    {
+      version: "v0.9",
+      updateComponents: {
+        surfaceId: "products",
+        components: [
+          { id: "root",          component: "Column",  children: ["header", "product-list"] },
+          { id: "header",        component: "Text",    text: `Results for "${query}"`, variant: "h1" },
+          { id: "product-list",  component: "List",    children: ["card-1", "card-2", "card-3"] },
+
+          { id: "card-1",        component: "Card",    children: ["name-1","price-1","divider-1","btn-1"] },
+          { id: "name-1",        component: "Text",    text: { path: "/products/0/name" }, variant: "h3" },
+          { id: "price-1",       component: "Text",    text: { path: "/products/0/price" }, variant: "caption" },
+          { id: "divider-1",     component: "Divider" },
+          { id: "btn-1",         component: "Button",  child: "btn-label-1", variant: "primary",
+            action: { event: { name: "add_to_cart", context: { productId: { path: "/products/0/id" } } } }
+          },
+          { id: "btn-label-1",   component: "Text",    text: "Add to Cart" },
+
+          { id: "card-2",        component: "Card",    children: ["name-2","price-2","divider-2","btn-2"] },
+          { id: "name-2",        component: "Text",    text: { path: "/products/1/name" }, variant: "h3" },
+          { id: "price-2",       component: "Text",    text: { path: "/products/1/price" }, variant: "caption" },
+          { id: "divider-2",     component: "Divider" },
+          { id: "btn-2",         component: "Button",  child: "btn-label-2", variant: "primary",
+            action: { event: { name: "add_to_cart", context: { productId: { path: "/products/1/id" } } } }
+          },
+          { id: "btn-label-2",   component: "Text",    text: "Add to Cart" },
+
+          { id: "card-3",        component: "Card",    children: ["name-3","price-3","divider-3","btn-3"] },
+          { id: "name-3",        component: "Text",    text: { path: "/products/2/name" }, variant: "h3" },
+          { id: "price-3",       component: "Text",    text: { path: "/products/2/price" }, variant: "caption" },
+          { id: "divider-3",     component: "Divider" },
+          { id: "btn-3",         component: "Button",  child: "btn-label-3", variant: "primary",
+            action: { event: { name: "add_to_cart", context: { productId: { path: "/products/2/id" } } } }
+          },
+          { id: "btn-label-3",   component: "Text",    text: "Add to Cart" },
+        ]
+      }
+    },
+    {
+      version: "v0.9",
+      updateDataModel: {
+        surfaceId: "products",
+        path: "/",
+        value: {
+          query,
+          total: 3,
+          products: [
+            { id: "e1", name: "Sony WH-1000XM5 Headphones", price: "$349.99", category: "electronics", rating: 4.8, stock: 12 },
+            { id: "e2", name: "Apple AirPods Pro (2nd Gen)",  price: "$249.00", category: "electronics", rating: 4.7, stock: 45 },
+            { id: "e4", name: "Bose QuietComfort 45",          price: "$279.00", category: "electronics", rating: 4.6, stock: 7  },
+          ]
+        }
+      }
+    }
+  ];
+
+  for (const msg of demoMessages) dispatchA2UIMessage(msg);
+  addMessage("system", "✓ Demo A2UI payload rendered (3 A2UI messages)");
+}
+
+// ── UI Helpers ────────────────────────────────────────────────────
+
+function addMessage(role, text) {
+  const div = document.createElement("div");
+  div.className = `msg ${role}`;
+  div.textContent = text;
+  const msgs = document.getElementById("messages");
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function showSkeleton() {
+  const root = document.getElementById("surface-root");
+  root.innerHTML = `
+    <div class="a2ui-List">
+      ${[1,2,3].map(() => `<div class="skeleton skeleton-card"></div>`).join("")}
+    </div>`;
+}
+
+function clearSkeleton() {
+  document.getElementById("surface-root").innerHTML = "";
+}
+
+function showToast(msg) {
+  const toast = document.getElementById("toast");
+  toast.textContent = msg;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 3000);
+}
+
+function logProto(type, msg) {
+  const div = document.createElement("div");
+  div.className = "proto-msg";
+  div.textContent = `[${type}] ${JSON.stringify(msg, null, 2)}`;
+  document.getElementById("proto-messages").prepend(div);
+}
+
+function toggleProto() {
+  document.getElementById("proto-panel").classList.toggle("open");
+}
+
+// ── Health Check on Load ─────────────────────────────────────────
+async function checkHealth() {
+  const dot  = document.getElementById("status-dot");
+  const text = document.getElementById("status-text");
+  try {
+    const res = await fetch(`${AGENT_BASE}/health`, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      const data = await res.json();
+      dot.style.background  = "var(--accent)";
+      dot.style.boxShadow   = "0 0 8px var(--accent)";
+      text.textContent = `Agent online · ${data.model || ""}`;
+      addMessage("system", `✓ Connected to agent at ${AGENT_BASE}`);
+    } else {
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch (err) {
+    dot.style.background = "var(--danger)";
+    dot.style.boxShadow  = "0 0 8px var(--danger)";
+    dot.style.animation  = "none";
+    text.textContent = "Agent offline — demo mode";
+    addMessage("system", `⚠ Cannot reach agent at ${AGENT_BASE} (${err.message})`);
+    addMessage("system", "Running in demo mode — responses are mocked.");
+  }
+}
+
+checkHealth();
+
+// Auto-send a demo on load if ?demo=1
+if (new URLSearchParams(location.search).get("demo") === "1") {
+  setTimeout(() => sendQuery("wireless headphones"), 800);
+}
+</script>
+</body>
+</html>
