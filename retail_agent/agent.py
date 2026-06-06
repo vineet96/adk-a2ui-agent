@@ -6,7 +6,10 @@ import os
 from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool
 
-MODEL = os.environ.get("MODEL", "gemini-2.5-flash")
+# gemini-2.0-flash: faster response, lower latency — better for Agent Engine
+# where the default timeout can cut off slower gemini-2.5-flash tool+JSON calls.
+# Switch back to gemini-2.5-flash via MODEL env var once confirmed working.
+MODEL = os.environ.get("MODEL", "gemini-2.0-flash")
 
 
 def search_products(query: str, category: str = "all", max_results: int = 5) -> dict:
@@ -55,15 +58,12 @@ def search_products(query: str, category: str = "all", max_results: int = 5) -> 
     }
 
 
-# ── Instruction ───────────────────────────────────────────────────────────────
-# Simplified prompt — no A2UI, just plain text first so we can confirm
-# the agent is working end-to-end before adding A2UI formatting.
-# Once confirmed, swap INSTRUCTION_PLAIN for INSTRUCTION_A2UI below.
+# ── Instructions ──────────────────────────────────────────────────────────────
 
 INSTRUCTION_PLAIN = """
 You are a helpful retail product search assistant.
-When a user asks about products, call search_products to find matching items,
-then respond with a clear list of results including name, price, and rating.
+When a user asks about products, call search_products to find items,
+then respond with a clear list including name, price, and rating.
 Keep your response concise and friendly.
 """
 
@@ -72,10 +72,7 @@ You are a helpful retail product search assistant.
 When a user asks about products:
 
 1. Call search_products to get real product data.
-2. Return your ENTIRE response wrapped in <a2ui-json> tags.
-3. Inside the tags, output ONLY a valid JSON array with exactly 3 objects.
-
-Example of the required format:
+2. Return your ENTIRE response wrapped in <a2ui-json> tags like this:
 
 <a2ui-json>
 [
@@ -93,10 +90,13 @@ Example of the required format:
       "components": [
         {"id": "root", "component": "Column", "children": ["title", "list"]},
         {"id": "title", "component": "Text", "text": "Search Results", "variant": "h1"},
-        {"id": "list", "component": "List", "children": ["card-0"]},
+        {"id": "list", "component": "List", "children": ["card-0", "card-1"]},
         {"id": "card-0", "component": "Card", "children": ["name-0", "price-0"]},
         {"id": "name-0", "component": "Text", "text": {"path": "/products/0/name"}, "variant": "h3"},
-        {"id": "price-0", "component": "Text", "text": {"path": "/products/0/price"}, "variant": "caption"}
+        {"id": "price-0", "component": "Text", "text": {"path": "/products/0/price"}, "variant": "caption"},
+        {"id": "card-1", "component": "Card", "children": ["name-1", "price-1"]},
+        {"id": "name-1", "component": "Text", "text": {"path": "/products/1/name"}, "variant": "h3"},
+        {"id": "price-1", "component": "Text", "text": {"path": "/products/1/price"}, "variant": "caption"}
       ]
     }
   },
@@ -106,23 +106,23 @@ Example of the required format:
       "surfaceId": "products",
       "path": "/",
       "value": {
-        "products": [{"id": "e1", "name": "Example", "price": "$0.00"}],
-        "query": "example"
+        "products": [],
+        "query": ""
       }
     }
   }
 ]
 </a2ui-json>
 
-Rules:
-- Replace example data in updateDataModel with REAL data from search_products.
-- Add one card per product in updateComponents (card-0, card-1, etc.).
-- Use {"path": "/products/N/name"} bindings — never hardcode product data in components.
-- Output NOTHING outside the <a2ui-json> tags.
-- JSON must be valid — no trailing commas.
+Fill updateDataModel.value.products with the REAL products from search_products.
+Fill updateDataModel.value.query with the user's search term.
+Add one card-N block per product in updateComponents.
+Use {"path": "/products/N/name"} — never hardcode product names in components.
+Output NOTHING outside the <a2ui-json> tags. JSON must be valid.
 """
 
-# ── Toggle here: use PLAIN to debug, A2UI for production ─────────────────────
+# ── Active instruction ────────────────────────────────────────────────────────
+# Set to INSTRUCTION_PLAIN first to verify end-to-end, then switch to A2UI.
 ACTIVE_INSTRUCTION = INSTRUCTION_A2UI
 
 root_agent = LlmAgent(
