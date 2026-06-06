@@ -1,6 +1,10 @@
-# Pin exact compatible versions to avoid ADK/Agent Engine mismatch.
-# "coroutine raised StopIteration" is caused by version drift between
-# local ADK and the Agent Engine runtime.
-# See: https://github.com/google/adk-python/issues/808
+# Exact versions required for Agent Engine + Gemini Enterprise compatibility.
+#
+# StopIteration inside coroutine (fast_api.py line 919) is caused by the
+# Agent Engine container running an ADK version older than 1.4.2.
+# ADK 1.4.2 fixes the async iterator handling in the FastAPI runner.
+#
+# session_id resource path issue is a Gemini Enterprise bug — patched in
+# retail_agent/patches.py via __init__.py.
 google-adk[a2a]==1.4.2
 google-cloud-aiplatform[adk,agent_engines]>=1.95.0
