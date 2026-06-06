@@ -1,24 +1,14 @@
 """
 Retail Product Search Agent — ADK 2.0 + Gemini + A2UI v0.9
-===========================================================
-Deployed to Vertex AI Agent Engine via:
-    adk deploy agent_engine --project=... --region=... retail_agent
-
-Local development:
-    adk run retail_agent
-    adk web retail_agent
 """
 
 import os
 from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool
 
-# ── Model ─────────────────────────────────────────────────────────────────────
-# On Agent Engine, authentication is via the project service account.
-# GOOGLE_GENAI_USE_VERTEXAI=true in .env routes calls through Vertex AI.
 MODEL = os.environ.get("MODEL", "gemini-2.5-flash")
 
-# ── Tool ─────────────────────────────────────────────────────────────────────
+
 def search_products(query: str, category: str = "all", max_results: int = 5) -> dict:
     """
     Search for products matching the query.
@@ -65,56 +55,80 @@ def search_products(query: str, category: str = "all", max_results: int = 5) -> 
     }
 
 
-# ── System prompt ─────────────────────────────────────────────────────────────
-A2UI_INSTRUCTION = """
-You are a helpful product search assistant for a retail store.
+# ── Instruction ───────────────────────────────────────────────────────────────
+# Simplified prompt — no A2UI, just plain text first so we can confirm
+# the agent is working end-to-end before adding A2UI formatting.
+# Once confirmed, swap INSTRUCTION_PLAIN for INSTRUCTION_A2UI below.
 
-When a user asks about products, you MUST:
-
-1. Call the search_products tool to retrieve real product data.
-2. Wrap your ENTIRE response in <a2ui-json> ... </a2ui-json> tags.
-3. Inside those tags, output ONLY a valid JSON array of exactly 3 A2UI v0.9 messages.
-
-The 3 messages must always be in this order:
-
-MESSAGE 1 - createSurface:
-{
-  "version": "v0.9",
-  "createSurface": {
-    "surfaceId": "products",
-    "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
-  }
-}
-
-MESSAGE 2 - updateComponents:
-Build one Card per product. Use {"path": "/products/N/field"} for all
-data-bound values — never hardcode values from the tool result.
-Component types allowed: Column, List, Card, Text, Button, Divider.
-
-MESSAGE 3 - updateDataModel:
-{
-  "version": "v0.9",
-  "updateDataModel": {
-    "surfaceId": "products",
-    "path": "/",
-    "value": { "products": [...tool results here...], "query": "..." }
-  }
-}
-
-STRICT RULES:
-- Do NOT hardcode product names or prices in updateComponents.
-  Always use {"path": "/products/N/name"} style bindings.
-- Output valid JSON only — no trailing commas, no comments.
-- Do NOT write anything outside the <a2ui-json> block.
-- Every Button must have an action.event with name and context.
+INSTRUCTION_PLAIN = """
+You are a helpful retail product search assistant.
+When a user asks about products, call search_products to find matching items,
+then respond with a clear list of results including name, price, and rating.
+Keep your response concise and friendly.
 """
 
-# ── Agent ─────────────────────────────────────────────────────────────────────
-# root_agent is the entry point ADK CLI looks for at module level.
+INSTRUCTION_A2UI = """
+You are a helpful retail product search assistant.
+When a user asks about products:
+
+1. Call search_products to get real product data.
+2. Return your ENTIRE response wrapped in <a2ui-json> tags.
+3. Inside the tags, output ONLY a valid JSON array with exactly 3 objects.
+
+Example of the required format:
+
+<a2ui-json>
+[
+  {
+    "version": "v0.9",
+    "createSurface": {
+      "surfaceId": "products",
+      "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateComponents": {
+      "surfaceId": "products",
+      "components": [
+        {"id": "root", "component": "Column", "children": ["title", "list"]},
+        {"id": "title", "component": "Text", "text": "Search Results", "variant": "h1"},
+        {"id": "list", "component": "List", "children": ["card-0"]},
+        {"id": "card-0", "component": "Card", "children": ["name-0", "price-0"]},
+        {"id": "name-0", "component": "Text", "text": {"path": "/products/0/name"}, "variant": "h3"},
+        {"id": "price-0", "component": "Text", "text": {"path": "/products/0/price"}, "variant": "caption"}
+      ]
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "products",
+      "path": "/",
+      "value": {
+        "products": [{"id": "e1", "name": "Example", "price": "$0.00"}],
+        "query": "example"
+      }
+    }
+  }
+]
+</a2ui-json>
+
+Rules:
+- Replace example data in updateDataModel with REAL data from search_products.
+- Add one card per product in updateComponents (card-0, card-1, etc.).
+- Use {"path": "/products/N/name"} bindings — never hardcode product data in components.
+- Output NOTHING outside the <a2ui-json> tags.
+- JSON must be valid — no trailing commas.
+"""
+
+# ── Toggle here: use PLAIN to debug, A2UI for production ─────────────────────
+ACTIVE_INSTRUCTION = INSTRUCTION_A2UI
+
 root_agent = LlmAgent(
     name="retail_search_agent",
     model=MODEL,
-    description="Retail product search agent returning A2UI v0.9 generative UI.",
-    instruction=A2UI_INSTRUCTION,
+    description="Retail product search agent.",
+    instruction=ACTIVE_INSTRUCTION,
     tools=[FunctionTool(func=search_products)],
 )
