@@ -1,9 +1,5 @@
-# Must match the locally installed ADK version exactly.
-# Mismatch between local and container ADK causes:
-#   RuntimeError: coroutine raised StopIteration  (ADK <1.4.2)
-#   Exception in ASGI application / empty stream  (version drift)
-#
-# Run: python3 -c "import importlib.metadata; print(importlib.metadata.version('google-adk'))"
-# to get your local version, then set it here.
-google-adk[a2a]==2.2.0
+# No version pin — let --adk_version in deploy.sh control the ADK version.
+# The deploy script reads the locally installed version and passes it via
+# --adk_version so the container always matches the dev environment exactly.
+google-adk[a2a]
 google-cloud-aiplatform[adk,agent_engines]>=1.95.0
