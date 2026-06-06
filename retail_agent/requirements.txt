@@ -1,1 +1,6 @@
-google-adk[a2a]>=2.0.0
+# Pin exact compatible versions to avoid ADK/Agent Engine mismatch.
+# "coroutine raised StopIteration" is caused by version drift between
+# local ADK and the Agent Engine runtime.
+# See: https://github.com/google/adk-python/issues/808
+google-adk[a2a]==1.4.2
+google-cloud-aiplatform[adk,agent_engines]>=1.95.0
