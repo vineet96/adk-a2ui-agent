@@ -23,19 +23,15 @@ PROJECT="${GOOGLE_CLOUD_PROJECT:-}"
 REGION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
 DISPLAY_NAME="adk-a2ui-retail-agent"
 
-# Use the locally installed ADK version — ensures container matches local env.
-ADK_VERSION=$(python3 -c "import importlib.metadata; print(importlib.metadata.version('google-adk'))" 2>/dev/null || echo "")
-
 [[ -z "$PROJECT" ]] && echo "ERROR: GOOGLE_CLOUD_PROJECT not set in retail_agent/.env" && exit 1
 
 echo ""
 echo "ADK A2UI Retail Agent — Agent Engine Deploy"
-echo "  Project     : $PROJECT"
-echo "  Region      : $REGION"
-echo "  ADK version : ${ADK_VERSION:-auto}"
+echo "  Project : $PROJECT"
+echo "  Region  : $REGION"
 echo ""
 
-# ── Build command ─────────────────────────────────────────────────────────────
+# ── Build deploy command ──────────────────────────────────────────────────────
 DEPLOY_CMD=(
     adk deploy agent_engine
     --project="$PROJECT"
@@ -44,55 +40,71 @@ DEPLOY_CMD=(
     --description="ADK A2UI retail agent - Gemini + A2UI v0.9"
 )
 
-# Pin the ADK version in the container to match local
-[[ -n "$ADK_VERSION" ]] && DEPLOY_CMD+=(--adk_version="$ADK_VERSION")
-
-# Point session service at Agent Engine so Gemini Enterprise session IDs
-# are resolved correctly without hitting the local validator.
-# This tells ADK to use Agent Engine's native session management,
-# bypassing VertexAiSessionService._validate_session_id entirely.
 if [[ "${1:-}" == "--update" ]]; then
     [[ ! -f "$MANIFEST" ]] && echo "ERROR: $MANIFEST not found — run without --update first" && exit 1
     AGENT_ENGINE_ID=$(python3 -c "import json; print(json.load(open('$MANIFEST'))['resource_id'])")
-    echo "Updating: $AGENT_ENGINE_ID"
+    echo "Updating resource: $AGENT_ENGINE_ID"
     DEPLOY_CMD+=(--agent_engine_id="$AGENT_ENGINE_ID")
+    # Use Agent Engine's native session service — bypasses _validate_session_id
+    # entirely, fixing the Agentspace resource path session_id error.
     DEPLOY_CMD+=(--session_service_uri="agentengine://$AGENT_ENGINE_ID")
+else
+    echo "Creating new deployment..."
 fi
 
 DEPLOY_CMD+=("$REPO_DIR/retail_agent")
 
-# ── Deploy ────────────────────────────────────────────────────────────────────
-echo "Running: ${DEPLOY_CMD[*]}"
+# ── Run deploy and capture full output ───────────────────────────────────────
+echo "Command: ${DEPLOY_CMD[*]}"
 echo ""
-OUTPUT=$("${DEPLOY_CMD[@]}" 2>&1)
-echo "$OUTPUT"
 
-# ── Parse resource name ───────────────────────────────────────────────────────
-RESOURCE_NAME=$(echo "$OUTPUT" | grep -oP 'projects/[^\s]+/reasoningEngines/[0-9]+' | head -1)
+# Tee to both terminal and capture file so we see live progress
+OUTFILE=$(mktemp)
+"${DEPLOY_CMD[@]}" 2>&1 | tee "$OUTFILE"
+OUTPUT=$(cat "$OUTFILE"); rm -f "$OUTFILE"
+
+# ── Extract resource name ─────────────────────────────────────────────────────
+# Try multiple patterns — CLI output format varies by ADK version
+RESOURCE_NAME=$(echo "$OUTPUT" | grep -oE 'projects/[^/]+/locations/[^/]+/reasoningEngines/[0-9]+' | head -1)
 
 if [[ -z "$RESOURCE_NAME" ]]; then
-    echo ""
-    echo "WARNING: Could not parse resource name from output."
-    echo "Check: https://console.cloud.google.com/vertex-ai/agents?project=$PROJECT"
-    exit 1
+    # Try alternate format: just the resource ID on its own line
+    RESOURCE_ID=$(echo "$OUTPUT" | grep -oE '\b[0-9]{15,}\b' | head -1)
+    if [[ -n "$RESOURCE_ID" ]]; then
+        RESOURCE_NAME="projects/$PROJECT/locations/$REGION/reasoningEngines/$RESOURCE_ID"
+        echo ""
+        echo "Inferred resource name: $RESOURCE_NAME"
+    else
+        echo ""
+        echo "WARNING: Could not parse resource name from deploy output."
+        echo "Find it at: https://console.cloud.google.com/vertex-ai/agents?project=$PROJECT"
+        echo ""
+        echo "Then create deploy/deployment_manifest.json manually:"
+        echo '{ "project_id": "'$PROJECT'", "location": "'$REGION'", "resource_id": "YOUR_ID", "resource_name": "projects/'$PROJECT'/locations/'$REGION'/reasoningEngines/YOUR_ID" }'
+        exit 0
+    fi
 fi
 
 RESOURCE_ID="${RESOURCE_NAME##*/}"
 
+# ── Save manifest ─────────────────────────────────────────────────────────────
 python3 -c "
 import json, time
-manifest = {
+m = {
     'project_id':    '$PROJECT',
     'location':      '$REGION',
     'resource_name': '$RESOURCE_NAME',
     'resource_id':   '$RESOURCE_ID',
     'display_name':  '$DISPLAY_NAME',
-    'adk_version':   '${ADK_VERSION:-unknown}',
     'deployed_at':   time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     'query_url':     'https://$REGION-aiplatform.googleapis.com/v1/$RESOURCE_NAME:query',
 }
-f = open('$MANIFEST', 'w')
-json.dump(manifest, f, indent=2)
-f.close()
-print('Manifest saved.')
+open('$MANIFEST', 'w').write(json.dumps(m, indent=2))
+print('Manifest saved: $MANIFEST')
 "
+
+echo ""
+echo "Done!"
+echo "  Resource : $RESOURCE_NAME"
+echo "  Test     : python deploy/test.py"
+echo "  Logs     : https://console.cloud.google.com/logs/query;query=resource.type%3D%22aiplatform.googleapis.com%2FReasoningEngine%22?project=$PROJECT"
