@@ -4,16 +4,13 @@
 # Usage:
 #   bash deploy/deploy.sh              # create new deployment
 #   bash deploy/deploy.sh --update     # update existing deployment
-#
-# Prerequisites:
-#   pip install "google-adk[a2a]" --upgrade
-#   gcloud auth application-default login
-#   gcloud services enable aiplatform.googleapis.com
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$REPO_DIR/retail_agent/.env"
 MANIFEST="$REPO_DIR/deploy/deployment_manifest.json"
+AGENT_DIR="$REPO_DIR/retail_agent"
+CONFIG_FILE="$AGENT_DIR/.agent_engine_config.json"
 
 # ── Load .env ─────────────────────────────────────────────────────────────────
 [[ ! -f "$ENV_FILE" ]] && echo "ERROR: $ENV_FILE not found" && exit 1
@@ -25,13 +22,19 @@ DISPLAY_NAME="adk-a2ui-retail-agent"
 
 [[ -z "$PROJECT" ]] && echo "ERROR: GOOGLE_CLOUD_PROJECT not set in retail_agent/.env" && exit 1
 
+# ── Detect available CLI flags ────────────────────────────────────────────────
+ADK_VERSION=$(adk --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
+HAS_ENGINE_ID=$(adk deploy agent_engine --help 2>&1 | grep -c "agent_engine_id" || true)
+HAS_SESSION_URI=$(adk deploy agent_engine --help 2>&1 | grep -c "session_service_uri" || true)
+
 echo ""
 echo "ADK A2UI Retail Agent — Agent Engine Deploy"
-echo "  Project : $PROJECT"
-echo "  Region  : $REGION"
+echo "  Project     : $PROJECT"
+echo "  Region      : $REGION"
+echo "  ADK version : $ADK_VERSION"
 echo ""
 
-# ── Build deploy command ──────────────────────────────────────────────────────
+# ── Build base command ────────────────────────────────────────────────────────
 DEPLOY_CMD=(
     adk deploy agent_engine
     --project="$PROJECT"
@@ -40,54 +43,70 @@ DEPLOY_CMD=(
     --description="ADK A2UI retail agent - Gemini + A2UI v0.9"
 )
 
+# ── Update mode ───────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--update" ]]; then
     [[ ! -f "$MANIFEST" ]] && echo "ERROR: $MANIFEST not found — run without --update first" && exit 1
     AGENT_ENGINE_ID=$(python3 -c "import json; print(json.load(open('$MANIFEST'))['resource_id'])")
     echo "Updating resource: $AGENT_ENGINE_ID"
-    DEPLOY_CMD+=(--agent_engine_id="$AGENT_ENGINE_ID")
-    # Use Agent Engine's native session service — bypasses _validate_session_id
-    # entirely, fixing the Agentspace resource path session_id error.
-    DEPLOY_CMD+=(--session_service_uri="agentengine://$AGENT_ENGINE_ID")
+
+    if [[ "$HAS_ENGINE_ID" -gt 0 ]]; then
+        # Newer ADK: --agent_engine_id flag available
+        DEPLOY_CMD+=(--agent_engine_id="$AGENT_ENGINE_ID")
+    else
+        # Older ADK: write .agent_engine_config.json instead
+        echo "Using .agent_engine_config.json for update (ADK $ADK_VERSION)"
+        python3 -c "
+import json
+cfg = {
+    'agent_engine_id': '$AGENT_ENGINE_ID',
+    'project': '$PROJECT',
+    'region': '$REGION',
+}
+open('$CONFIG_FILE', 'w').write(json.dumps(cfg, indent=2))
+print('Wrote $CONFIG_FILE')
+"
+    fi
+
+    # Use Agent Engine native sessions if supported — fixes Agentspace session_id
+    if [[ "$HAS_SESSION_URI" -gt 0 ]]; then
+        DEPLOY_CMD+=(--session_service_uri="agentengine://$AGENT_ENGINE_ID")
+    fi
 else
     echo "Creating new deployment..."
 fi
 
-DEPLOY_CMD+=("$REPO_DIR/retail_agent")
+DEPLOY_CMD+=("$AGENT_DIR")
 
-# ── Run deploy and capture full output ───────────────────────────────────────
-echo "Command: ${DEPLOY_CMD[*]}"
+# ── Run ───────────────────────────────────────────────────────────────────────
+echo "Running: ${DEPLOY_CMD[*]}"
 echo ""
 
-# Tee to both terminal and capture file so we see live progress
 OUTFILE=$(mktemp)
-"${DEPLOY_CMD[@]}" 2>&1 | tee "$OUTFILE"
+"${DEPLOY_CMD[@]}" 2>&1 | tee "$OUTFILE" || true
 OUTPUT=$(cat "$OUTFILE"); rm -f "$OUTFILE"
 
-# ── Extract resource name ─────────────────────────────────────────────────────
-# Try multiple patterns — CLI output format varies by ADK version
+# Clean up config file after deploy
+[[ -f "$CONFIG_FILE" ]] && rm -f "$CONFIG_FILE"
+
+# ── Parse resource name ───────────────────────────────────────────────────────
 RESOURCE_NAME=$(echo "$OUTPUT" | grep -oE 'projects/[^/]+/locations/[^/]+/reasoningEngines/[0-9]+' | head -1)
 
 if [[ -z "$RESOURCE_NAME" ]]; then
-    # Try alternate format: just the resource ID on its own line
     RESOURCE_ID=$(echo "$OUTPUT" | grep -oE '\b[0-9]{15,}\b' | head -1)
     if [[ -n "$RESOURCE_ID" ]]; then
         RESOURCE_NAME="projects/$PROJECT/locations/$REGION/reasoningEngines/$RESOURCE_ID"
-        echo ""
-        echo "Inferred resource name: $RESOURCE_NAME"
     else
         echo ""
-        echo "WARNING: Could not parse resource name from deploy output."
-        echo "Find it at: https://console.cloud.google.com/vertex-ai/agents?project=$PROJECT"
+        echo "Deploy output did not contain a resource name."
+        echo "Check: https://console.cloud.google.com/vertex-ai/agents?project=$PROJECT"
         echo ""
-        echo "Then create deploy/deployment_manifest.json manually:"
-        echo '{ "project_id": "'$PROJECT'", "location": "'$REGION'", "resource_id": "YOUR_ID", "resource_name": "projects/'$PROJECT'/locations/'$REGION'/reasoningEngines/YOUR_ID" }'
+        echo "If deployed successfully, create $MANIFEST manually:"
+        echo "  python3 deploy/save_manifest.py YOUR_RESOURCE_ID"
         exit 0
     fi
 fi
 
 RESOURCE_ID="${RESOURCE_NAME##*/}"
-
-# ── Save manifest ─────────────────────────────────────────────────────────────
 python3 -c "
 import json, time
 m = {
@@ -100,11 +119,10 @@ m = {
     'query_url':     'https://$REGION-aiplatform.googleapis.com/v1/$RESOURCE_NAME:query',
 }
 open('$MANIFEST', 'w').write(json.dumps(m, indent=2))
-print('Manifest saved: $MANIFEST')
+print('Manifest: $MANIFEST')
 "
 
 echo ""
-echo "Done!"
-echo "  Resource : $RESOURCE_NAME"
-echo "  Test     : python deploy/test.py"
-echo "  Logs     : https://console.cloud.google.com/logs/query;query=resource.type%3D%22aiplatform.googleapis.com%2FReasoningEngine%22?project=$PROJECT"
+echo "Done! Resource: $RESOURCE_NAME"
+echo "Test : python deploy/test.py"
+echo "Logs : https://console.cloud.google.com/logs/query;query=resource.type%3D%22aiplatform.googleapis.com%2FReasoningEngine%22?project=$PROJECT"
