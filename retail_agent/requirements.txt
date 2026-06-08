@@ -1,5 +1,2 @@
-# No version pin — let --adk_version in deploy.sh control the ADK version.
-# The deploy script reads the locally installed version and passes it via
-# --adk_version so the container always matches the dev environment exactly.
 google-adk[a2a]
 google-cloud-aiplatform[adk,agent_engines]>=1.95.0

@@ -2,13 +2,22 @@
 Retail Product Search Agent — ADK 2.0 + Gemini + A2UI v0.9
 """
 
+import logging
 import os
+
 from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool
 
-# gemini-2.0-flash: faster response, lower latency — better for Agent Engine
-# where the default timeout can cut off slower gemini-2.5-flash tool+JSON calls.
-# Switch back to gemini-2.5-flash via MODEL env var once confirmed working.
+logger = logging.getLogger(__name__)
+
+# Apply session_id patch early — before any sessions are created
+try:
+    from . import patches as _patches
+    _applied = _patches.apply()
+    logger.info(f"patches applied: {_applied}")
+except Exception as e:
+    logger.warning(f"patches import failed (non-fatal): {e}")
+
 MODEL = os.environ.get("MODEL", "gemini-2.0-flash")
 
 
@@ -51,23 +60,12 @@ def search_products(query: str, category: str = "all", max_results: int = 5) -> 
     if not results:
         results = [p for p in CATALOG
                    if category == "all" or p["category"] == category]
-    return {
-        "products": results[:max_results],
-        "total": len(results[:max_results]),
-        "query": query,
-    }
+    found = results[:max_results]
+    logger.info(f"search_products: '{query}' -> {len(found)} results")
+    return {"products": found, "total": len(found), "query": query}
 
 
-# ── Instructions ──────────────────────────────────────────────────────────────
-
-INSTRUCTION_PLAIN = """
-You are a helpful retail product search assistant.
-When a user asks about products, call search_products to find items,
-then respond with a clear list including name, price, and rating.
-Keep your response concise and friendly.
-"""
-
-INSTRUCTION_A2UI = """
+INSTRUCTION = """
 You are a helpful retail product search assistant.
 When a user asks about products:
 
@@ -114,21 +112,17 @@ When a user asks about products:
 ]
 </a2ui-json>
 
-Fill updateDataModel.value.products with the REAL products from search_products.
-Fill updateDataModel.value.query with the user's search term.
-Add one card-N block per product in updateComponents.
-Use {"path": "/products/N/name"} — never hardcode product names in components.
+Fill updateDataModel value.products with the real products from search_products.
+Fill updateDataModel value.query with the user search term.
+Add one card-N block per product in updateComponents children.
+Use path bindings like {"path": "/products/0/name"} — never hardcode names.
 Output NOTHING outside the <a2ui-json> tags. JSON must be valid.
 """
-
-# ── Active instruction ────────────────────────────────────────────────────────
-# Set to INSTRUCTION_PLAIN first to verify end-to-end, then switch to A2UI.
-ACTIVE_INSTRUCTION = INSTRUCTION_A2UI
 
 root_agent = LlmAgent(
     name="retail_search_agent",
     model=MODEL,
-    description="Retail product search agent.",
-    instruction=ACTIVE_INSTRUCTION,
+    description="Retail product search agent returning A2UI v0.9 generative UI.",
+    instruction=INSTRUCTION,
     tools=[FunctionTool(func=search_products)],
 )
